@@ -3,12 +3,12 @@ from supabase import create_client, Client
 import pandas as pd
 from datetime import datetime
 
-# --- CONEXÃO ---
+# --- CONEXÃO (Mantenha suas chaves aqui) ---
 URL = "https://dwbnfdgwtfubmemkakhg.supabase.co".strip()
 KEY = "sb_publishable_7INEN7NrbcF72S2PVL0ENw_OEXlX3fH".strip()
 supabase: Client = create_client(URL, KEY)
 
-# --- NOME DA TABELA REAL (CONFORME SEU PRINT) ---
+# --- A TABELA CORRETA QUE VOCÊ INDICOU ---
 TABELA_ALUNOS = "alunos_cadastro_2026" 
 
 def main():
@@ -51,7 +51,6 @@ def tela_login():
                             if senha == user['senha']:
                                 st.session_state.logado = True
                                 st.session_state.usuario = user['nome']
-                                st.session_state.permissao = user['permissao']
                                 st.rerun()
                             else: st.error("Senha incorreta.")
                 else: st.error("Usuário não autorizado.")
@@ -75,17 +74,16 @@ def tela_coleta_operacional():
     st.subheader("📝 REGISTRO DE CAMPO")
     
     try:
-        # Buscando turmas na tabela correta: alunos_cadastro_2026
+        # Puxando turmas da tabela alunos_cadastro_2026
         res_turmas = supabase.table(TABELA_ALUNOS).select("turma").execute()
         if res_turmas.data:
-            # Remove valores nulos e gera lista única
             turmas = sorted(list(set([r['turma'] for r in res_turmas.data if r.get('turma')])))
         else:
             turmas = []
-            st.warning(f"A tabela {TABELA_ALUNOS} parece estar vazia.")
+            st.warning("Aguardando carregamento de dados da tabela.")
     except Exception as e:
         turmas = []
-        st.error(f"Erro ao acessar dados: {e}")
+        st.error(f"Erro ao acessar {TABELA_ALUNOS}: {e}")
 
     c1, c2 = st.columns(2)
     turma_sel = c1.selectbox("Selecione a Turma", [""] + turmas)
@@ -94,7 +92,7 @@ def tela_coleta_operacional():
     if turma_sel:
         st.write("---")
         try:
-            # Busca os alunos na tabela correta
+            # Busca alunos na tabela correta
             res_alunos = supabase.table(TABELA_ALUNOS).select("nome").eq("turma", turma_sel).order("nome").execute()
             if res_alunos.data:
                 lista_nomes = [a['nome'] for a in res_alunos.data]
@@ -128,32 +126,28 @@ def tela_analise_percentual():
     try:
         res = supabase.table("movimentacao").select("*").execute()
         if not res.data:
-            st.info("Aguardando registros para gerar análise.")
+            st.info("Aguardando registros para análise.")
             return
 
         df = pd.DataFrame(res.data)
         aluno_busca = st.text_input("🔍 Localizar Educando", placeholder="Digite o nome...")
-
         if aluno_busca:
-            # Proteção caso o nome da coluna no histórico seja diferente
-            col_nome = 'aluno_nome' if 'aluno_nome' in df.columns else df.columns[0]
-            df = df[df[col_nome].astype(str).str.contains(aluno_busca, case=False)]
+            df = df[df['aluno_nome'].astype(str).str.contains(aluno_busca, case=False)]
 
         base_dias = st.number_input("Dias Letivos de Base", value=22, min_value=1)
-        
-        f_reais = len(df[df['tipo'] == 'Falta']) if 'tipo' in df.columns else 0
-        f_just = len(df[df['tipo'] == 'Falta Justificada (Atestado)']) if 'tipo' in df.columns else 0
+        f_reais = len(df[df['tipo'] == 'Falta'])
+        f_just = len(df[df['tipo'] == 'Falta Justificada (Atestado)'])
         perc = (f_reais / base_dias) * 100 if base_dias > 0 else 0
 
         c1, c2, c3 = st.columns(3)
         c1.metric("Faltas Reais", f_reais)
         c2.metric("Justificadas", f_just)
-        c3.metric("% Evasão/Falta", f"{perc:.1f}%")
+        c3.metric("% Faltas", f"{perc:.1f}%")
 
         st.write("---")
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df[['data_evento', 'aluno_nome', 'tipo', 'observacao']].sort_values(by='data_evento', ascending=False), use_container_width=True, hide_index=True)
     except Exception as e:
-        st.error(f"Erro no processamento: {e}")
+        st.error(f"Erro: {e}")
 
 if __name__ == "__main__":
     main()
