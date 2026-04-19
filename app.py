@@ -3,24 +3,17 @@ from supabase import create_client, Client
 import pandas as pd
 from datetime import datetime
 
-# --- CONEXÃO (Mantenha suas chaves aqui) ---
+# --- CONEXÃO ---
 URL = "https://dwbnfdgwtfubmemkakhg.supabase.co".strip()
 KEY = "sb_publishable_7INEN7NrbcF72S2PVL0ENw_OEXlX3fH".strip()
 supabase: Client = create_client(URL, KEY)
 
-# --- A TABELA CORRETA QUE VOCÊ INDICOU ---
-TABELA_ALUNOS = "alunos_cadastro_2026" 
+# --- CONFIGURAÇÃO ---
+TABELA_ALUNOS = "alunos_cadastro_2026"
+TABELA_MOV = "movimentacao"
 
 def main():
     st.set_page_config(page_title="SENTINEL - Intelligence", page_icon="🛡️", layout="wide")
-
-    st.markdown("""
-        <style>
-        .main { background-color: #f8fafc; }
-        .stMetric { background-color: white; padding: 15px; border-radius: 10px; border: 1px solid #e2e8f0; }
-        .stButton>button { width: 100%; background-color: #0f172a; color: white; }
-        </style>
-    """, unsafe_allow_html=True)
 
     if 'logado' not in st.session_state:
         st.session_state.logado = False
@@ -53,12 +46,20 @@ def tela_login():
                                 st.session_state.usuario = user['nome']
                                 st.rerun()
                             else: st.error("Senha incorreta.")
-                else: st.error("Usuário não autorizado.")
-            except Exception as e: st.error(f"Erro de conexão: {e}")
+                else: st.error("Usuário não cadastrado.")
+            except Exception as e: st.error(f"Erro: {e}")
 
 def aba_principal():
     st.sidebar.title("SENTINEL 🛡️")
-    menu = ["📝 Lançamento (Campo)", "📊 Análise de Frequência (SIS)"]
+    st.sidebar.markdown(f"👤 {st.session_state.usuario}")
+    
+    # Contador de Alunos na base
+    try:
+        total_alunos = supabase.table(TABELA_ALUNOS).select("id", count="exact").execute().count
+        st.sidebar.metric("Alunos Cadastrados", total_alunos)
+    except: pass
+
+    menu = ["📝 Lançamento de Campo", "📊 Dashboard SIS (Consulta)"]
     escolha = st.sidebar.radio("Navegação", menu)
     
     if st.sidebar.button("Sair"):
@@ -66,88 +67,93 @@ def aba_principal():
         st.rerun()
 
     if "Lançamento" in escolha:
-        tela_coleta_operacional()
+        tela_coleta()
     else:
-        tela_analise_percentual()
+        tela_consulta_detalhada()
 
-def tela_coleta_operacional():
+def tela_coleta():
     st.subheader("📝 REGISTRO DE CAMPO")
-    
     try:
-        # Puxando turmas da tabela alunos_cadastro_2026
         res_turmas = supabase.table(TABELA_ALUNOS).select("turma").execute()
-        if res_turmas.data:
-            turmas = sorted(list(set([r['turma'] for r in res_turmas.data if r.get('turma')])))
-        else:
-            turmas = []
-            st.warning("Aguardando carregamento de dados da tabela.")
-    except Exception as e:
-        turmas = []
-        st.error(f"Erro ao acessar {TABELA_ALUNOS}: {e}")
+        turmas = sorted(list(set([r['turma'] for r in res_turmas.data if r.get('turma')])))
+    except: turmas = []
 
     c1, c2 = st.columns(2)
     turma_sel = c1.selectbox("Selecione a Turma", [""] + turmas)
-    data_evento = c2.date_input("Data da Ocorrência", datetime.now())
+    data_evento = c2.date_input("Data", datetime.now())
 
     if turma_sel:
-        st.write("---")
-        try:
-            # Busca alunos na tabela correta
-            res_alunos = supabase.table(TABELA_ALUNOS).select("nome").eq("turma", turma_sel).order("nome").execute()
-            if res_alunos.data:
-                lista_nomes = [a['nome'] for a in res_alunos.data]
-                selecionados = st.multiselect(f"Educandos da Turma {turma_sel}:", lista_nomes)
-                
-                if selecionados:
-                    dados_para_salvar = []
-                    for nome in selecionados:
-                        with st.expander(f"⚙️ Detalhes: {nome}", expanded=True):
-                            col_t, col_o = st.columns([1, 2])
-                            tipo = col_t.selectbox("Ocorrência", ["Falta", "Falta Justificada (Atestado)", "Atraso", "Saída Antecipada"], key=f"t_{nome}")
-                            obs = col_o.text_input("Observação", key=f"o_{nome}")
-                            dados_para_salvar.append({
-                                "aluno_nome": nome,
-                                "data_evento": str(data_evento),
-                                "tipo": tipo,
-                                "observacao": f"{obs} | Por: {st.session_state.usuario}"
-                            })
+        res_alunos = supabase.table(TABELA_ALUNOS).select("nome").eq("turma", turma_sel).order("nome").execute()
+        lista_nomes = [a['nome'] for a in res_alunos.data]
+        selecionados = st.multiselect(f"Educandos da {turma_sel}:", lista_nomes)
+        
+        if selecionados:
+            dados_salvar = []
+            for nome in selecionados:
+                with st.expander(f"Ajustar: {nome}", expanded=True):
+                    col_t, col_o = st.columns([1, 2])
+                    # Forçando a escolha do tipo para evitar erros
+                    tipo = col_t.selectbox("Tipo de Ocorrência", 
+                                         ["--- Selecione ---", "Falta", "Falta Justificada (Atestado)", "Atraso", "Saída Antecipada"], 
+                                         key=f"t_{nome}")
+                    obs = col_o.text_input("Observação/Motivo", key=f"o_{nome}")
                     
-                    if st.button("🚀 SALVAR REGISTROS"):
-                        supabase.table("movimentacao").insert(dados_para_salvar).execute()
-                        st.success("Sincronizado com o SIS!")
-                        st.balloons()
-            else:
-                st.info("Nenhum aluno encontrado para esta turma.")
-        except Exception as e:
-            st.error(f"Erro ao filtrar alunos: {e}")
+                    if tipo != "--- Selecione ---":
+                        dados_salvar.append({
+                            "aluno_nome": nome,
+                            "turma": turma_sel, # Gravando a turma junto para facilitar consulta
+                            "data_evento": str(data_evento),
+                            "tipo": tipo,
+                            "observacao": f"{obs} | Por: {st.session_state.usuario}"
+                        })
+            
+            if st.button("🚀 FINALIZAR LANÇAMENTO"):
+                if len(dados_salvar) < len(selecionados):
+                    st.warning("⚠️ Selecione o tipo de ocorrência para todos os alunos antes de salvar.")
+                else:
+                    supabase.table(TABELA_MOV).insert(dados_salvar).execute()
+                    st.success("Registros salvos com sucesso!")
+                    st.balloons()
 
-def tela_analise_percentual():
-    st.subheader("📊 ANÁLISE E PERCENTUAIS")
-    try:
-        res = supabase.table("movimentacao").select("*").execute()
-        if not res.data:
-            st.info("Aguardando registros para análise.")
-            return
+def tela_consulta_detalhada():
+    st.subheader("📊 CONSULTA E AUDITORIA SIS")
+    
+    # Busca registros
+    res = supabase.table(TABELA_MOV).select("*").order("data_evento", desc=True).execute()
+    if not res.data:
+        st.info("Aguardando registros.")
+        return
 
-        df = pd.DataFrame(res.data)
-        aluno_busca = st.text_input("🔍 Localizar Educando", placeholder="Digite o nome...")
-        if aluno_busca:
-            df = df[df['aluno_nome'].astype(str).str.contains(aluno_busca, case=False)]
+    df = pd.DataFrame(res.data)
 
-        base_dias = st.number_input("Dias Letivos de Base", value=22, min_value=1)
-        f_reais = len(df[df['tipo'] == 'Falta'])
-        f_just = len(df[df['tipo'] == 'Falta Justificada (Atestado)'])
-        perc = (f_reais / base_dias) * 100 if base_dias > 0 else 0
+    # Filtros de Dashboard
+    c1, c2, c3 = st.columns([2, 1, 1])
+    f_nome = c1.text_input("🔍 Buscar Educando")
+    
+    # Filtro de Turma (Dinâmico)
+    turmas_existentes = sorted(df['turma'].unique().tolist()) if 'turma' in df.columns else []
+    f_turma = c2.selectbox("Filtrar por Turma", ["Todas"] + turmas_existentes)
+    
+    base_dias = c3.number_input("Dias Letivos", value=22)
 
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Faltas Reais", f_reais)
-        c2.metric("Justificadas", f_just)
-        c3.metric("% Faltas", f"{perc:.1f}%")
+    # Aplicação dos filtros no DataFrame
+    if f_nome:
+        df = df[df['aluno_nome'].str.contains(f_nome, case=False)]
+    if f_turma != "Todas":
+        df = df[df['turma'] == f_turma]
 
-        st.write("---")
-        st.dataframe(df[['data_evento', 'aluno_nome', 'tipo', 'observacao']].sort_values(by='data_evento', ascending=False), use_container_width=True, hide_index=True)
-    except Exception as e:
-        st.error(f"Erro: {e}")
+    # Métricas
+    total_f = len(df[df['tipo'] == 'Falta'])
+    total_j = len(df[df['tipo'] == 'Falta Justificada (Atestado)'])
+    st.metric("Índice de Faltas Reais", f"{total_f} registros", delta=f"{((total_f/base_dias)*100):.1f}% de impacto")
+
+    st.write("---")
+    # Tabela com as colunas que você precisava
+    colunas_exibir = ['data_evento', 'aluno_nome', 'turma', 'tipo', 'observacao']
+    # Verifica se as colunas existem (segurança)
+    cols_existentes = [c for c in colunas_exibir if c in df.columns]
+    
+    st.dataframe(df[cols_existentes], use_container_width=True, hide_index=True)
 
 if __name__ == "__main__":
     main()
