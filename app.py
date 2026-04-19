@@ -8,8 +8,9 @@ URL = "https://dwbnfdgwtfubmemkakhg.supabase.co".strip()
 KEY = "sb_publishable_7INEN7NrbcF72S2PVL0ENw_OEXlX3fH".strip()
 supabase: Client = create_client(URL, KEY)
 
-# --- NOME DA TABELA REAL (CONFORME SEU PRINT) ---
+# --- CONFIGURAÇÃO DE TABELAS ---
 TABELA_ALUNOS = "import_67a268688437a" 
+TABELA_REGISTROS = "movimentacao"
 
 def main():
     st.set_page_config(page_title="SENTINEL - Intelligence", page_icon="🛡️", layout="wide")
@@ -59,6 +60,7 @@ def tela_login():
 
 def aba_principal():
     st.sidebar.title("SENTINEL 🛡️")
+    st.sidebar.markdown(f"👤 {st.session_state.usuario}")
     menu = ["📝 Lançamento (Campo)", "📊 Análise de Frequência (SIS)"]
     escolha = st.sidebar.radio("Navegação", menu)
     
@@ -75,16 +77,14 @@ def tela_coleta_operacional():
     st.subheader("📝 REGISTRO DE CAMPO")
     
     try:
-        # Buscando as turmas na tabela de importação correta
         res_turmas = supabase.table(TABELA_ALUNOS).select("turma").execute()
         if res_turmas.data:
             turmas = sorted(list(set([r['turma'] for r in res_turmas.data if r.get('turma')])))
         else:
             turmas = []
-            st.warning(f"Nenhuma turma encontrada na tabela {TABELA_ALUNOS}.")
-    except Exception as e:
+            st.warning("Nenhuma turma encontrada.")
+    except:
         turmas = []
-        st.error(f"Erro ao acessar dados: {e}")
 
     c1, c2 = st.columns(2)
     turma_sel = c1.selectbox("Selecione a Turma", [""] + turmas)
@@ -93,7 +93,6 @@ def tela_coleta_operacional():
     if turma_sel:
         st.write("---")
         try:
-            # Busca os alunos na tabela de importação filtrando pela turma
             res_alunos = supabase.table(TABELA_ALUNOS).select("nome").eq("turma", turma_sel).order("nome").execute()
             if res_alunos.data:
                 lista_nomes = [a['nome'] for a in res_alunos.data]
@@ -114,7 +113,7 @@ def tela_coleta_operacional():
                             })
                     
                     if st.button("🚀 SALVAR REGISTROS"):
-                        supabase.table("movimentacao").insert(dados_para_salvar).execute()
+                        supabase.table(TABELA_REGISTROS).insert(dados_para_salvar).execute()
                         st.success("Sincronizado com o SIS!")
                         st.balloons()
             else:
@@ -125,21 +124,27 @@ def tela_coleta_operacional():
 def tela_analise_percentual():
     st.subheader("📊 ANÁLISE E PERCENTUAIS")
     try:
-        res = supabase.table("movimentacao").select("*").execute()
+        res = supabase.table(TABELA_REGISTROS).select("*").execute()
         if not res.data:
             st.info("Aguardando registros para gerar análise.")
             return
 
         df = pd.DataFrame(res.data)
+        
+        # BUSCA POR NOME (Proteção contra erro de coluna)
         aluno_busca = st.text_input("🔍 Localizar Educando", placeholder="Digite o nome...")
-
+        
+        # Verifica se a coluna aluno_nome existe antes de filtrar
+        coluna_nome = 'aluno_nome' if 'aluno_nome' in df.columns else df.columns[0]
+        
         if aluno_busca:
-            df = df[df['aluno_nome'].str.contains(aluno_busca, case=False)]
+            df = df[df[coluna_nome].astype(str).str.contains(aluno_busca, case=False)]
 
         base_dias = st.number_input("Dias Letivos de Base", value=22, min_value=1)
         
-        f_reais = len(df[df['tipo'] == 'Falta'])
-        f_just = len(df[df['tipo'] == 'Falta Justificada (Atestado)'])
+        # Filtros de tipos de ocorrência
+        f_reais = len(df[df['tipo'] == 'Falta']) if 'tipo' in df.columns else 0
+        f_just = len(df[df['tipo'] == 'Falta Justificada (Atestado)']) if 'tipo' in df.columns else 0
         perc = (f_reais / base_dias) * 100 if base_dias > 0 else 0
 
         c1, c2, c3 = st.columns(3)
@@ -148,7 +153,9 @@ def tela_analise_percentual():
         c3.metric("% Evasão/Falta", f"{perc:.1f}%")
 
         st.write("---")
-        st.dataframe(df[['data_evento', 'aluno_nome', 'tipo', 'observacao']].sort_values(by='data_evento', ascending=False), use_container_width=True, hide_index=True)
+        # Mostra a tabela com o que tiver disponível
+        st.dataframe(df, use_container_width=True, hide_index=True)
+        
     except Exception as e:
         st.error(f"Erro no processamento: {e}")
 
