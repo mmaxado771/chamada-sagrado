@@ -8,6 +8,9 @@ URL = "https://dwbnfdgwtfubmemkakhg.supabase.co".strip()
 KEY = "sb_publishable_7INEN7NrbcF72S2PVL0ENw_OEXlX3fH".strip()
 supabase: Client = create_client(URL, KEY)
 
+# --- NOME DA TABELA REAL (CONFORME SEU PRINT) ---
+TABELA_ALUNOS = "import_67a268688437a" 
+
 def main():
     st.set_page_config(page_title="SENTINEL - Intelligence", page_icon="🛡️", layout="wide")
 
@@ -72,17 +75,16 @@ def tela_coleta_operacional():
     st.subheader("📝 REGISTRO DE CAMPO")
     
     try:
-        # ATENÇÃO: Buscando na tabela 'educandos' (no plural)
-        res_turmas = supabase.table("educandos").select("turma").execute()
+        # Buscando as turmas na tabela de importação correta
+        res_turmas = supabase.table(TABELA_ALUNOS).select("turma").execute()
         if res_turmas.data:
-            # Extrai as turmas únicas dos alunos cadastrados
             turmas = sorted(list(set([r['turma'] for r in res_turmas.data if r.get('turma')])))
         else:
             turmas = []
-            st.warning("Nenhum dado de turma encontrado na tabela 'educandos'.")
+            st.warning(f"Nenhuma turma encontrada na tabela {TABELA_ALUNOS}.")
     except Exception as e:
         turmas = []
-        st.error(f"Erro ao acessar tabela 'educandos': {e}")
+        st.error(f"Erro ao acessar dados: {e}")
 
     c1, c2 = st.columns(2)
     turma_sel = c1.selectbox("Selecione a Turma", [""] + turmas)
@@ -91,8 +93,8 @@ def tela_coleta_operacional():
     if turma_sel:
         st.write("---")
         try:
-            # Busca os alunos que pertencem à turma selecionada
-            res_alunos = supabase.table("educandos").select("nome").eq("turma", turma_sel).order("nome").execute()
+            # Busca os alunos na tabela de importação filtrando pela turma
+            res_alunos = supabase.table(TABELA_ALUNOS).select("nome").eq("turma", turma_sel).order("nome").execute()
             if res_alunos.data:
                 lista_nomes = [a['nome'] for a in res_alunos.data]
                 selecionados = st.multiselect(f"Educandos da Turma {turma_sel}:", lista_nomes)
@@ -138,7 +140,7 @@ def tela_analise_percentual():
         
         f_reais = len(df[df['tipo'] == 'Falta'])
         f_just = len(df[df['tipo'] == 'Falta Justificada (Atestado)'])
-        perc = (f_reais / base_dias) * 100
+        perc = (f_reais / base_dias) * 100 if base_dias > 0 else 0
 
         c1, c2, c3 = st.columns(3)
         c1.metric("Faltas Reais", f_reais)
