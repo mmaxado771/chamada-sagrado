@@ -4,8 +4,8 @@ import pandas as pd
 from datetime import datetime
 
 # --- CONEXÃO (Substitua pelos seus dados do Supabase) ---
-URL = "SUA_URL_AQUI"
-KEY = "SUA_ANON_KEY_AQUI"
+URL = "https://dwbnfdgwtfubmemkakhg.supabase.co"
+KEY = "sb_publishable_7INEN7NrbcF72S2PVL0ENw_OEXlX3fH"
 supabase: Client = create_client(URL, KEY)
 
 def main():
