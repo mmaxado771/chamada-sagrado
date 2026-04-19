@@ -50,16 +50,12 @@ def tela_login():
                                 st.session_state.usuario = user['nome']
                                 st.session_state.permissao = user['permissao']
                                 st.rerun()
-                            else:
-                                st.error("Senha incorreta.")
-                else:
-                    st.error("Usuário não autorizado.")
-            except Exception as e:
-                st.error(f"Erro de conexão: {e}")
+                            else: st.error("Senha incorreta.")
+                else: st.error("Usuário não autorizado.")
+            except Exception as e: st.error(f"Erro de conexão: {e}")
 
 def aba_principal():
     st.sidebar.title("SENTINEL 🛡️")
-    st.sidebar.markdown(f"👤 {st.session_state.usuario}")
     menu = ["📝 Lançamento (Campo)", "📊 Análise de Frequência (SIS)"]
     escolha = st.sidebar.radio("Navegação", menu)
     
@@ -76,16 +72,17 @@ def tela_coleta_operacional():
     st.subheader("📝 REGISTRO DE CAMPO")
     
     try:
-        # Busca turmas
+        # ATENÇÃO: Buscando na tabela 'educandos' (no plural)
         res_turmas = supabase.table("educandos").select("turma").execute()
         if res_turmas.data:
+            # Extrai as turmas únicas dos alunos cadastrados
             turmas = sorted(list(set([r['turma'] for r in res_turmas.data if r.get('turma')])))
         else:
             turmas = []
-            st.warning("Nenhuma turma encontrada na tabela 'educandos'.")
-    except:
+            st.warning("Nenhum dado de turma encontrado na tabela 'educandos'.")
+    except Exception as e:
         turmas = []
-        st.error("Falha ao carregar turmas.")
+        st.error(f"Erro ao acessar tabela 'educandos': {e}")
 
     c1, c2 = st.columns(2)
     turma_sel = c1.selectbox("Selecione a Turma", [""] + turmas)
@@ -94,17 +91,18 @@ def tela_coleta_operacional():
     if turma_sel:
         st.write("---")
         try:
+            # Busca os alunos que pertencem à turma selecionada
             res_alunos = supabase.table("educandos").select("nome").eq("turma", turma_sel).order("nome").execute()
             if res_alunos.data:
                 lista_nomes = [a['nome'] for a in res_alunos.data]
-                selecionados = st.multiselect(f"Educandos da Turma {turma_sel} (Quadro):", lista_nomes)
+                selecionados = st.multiselect(f"Educandos da Turma {turma_sel}:", lista_nomes)
                 
                 if selecionados:
                     dados_para_salvar = []
                     for nome in selecionados:
-                        with st.expander(f"Ajustar: {nome}", expanded=True):
+                        with st.expander(f"⚙️ Detalhes: {nome}", expanded=True):
                             col_t, col_o = st.columns([1, 2])
-                            tipo = col_t.selectbox("Tipo", ["Falta", "Falta Justificada (Atestado)", "Atraso", "Saída Antecipada"], key=f"t_{nome}")
+                            tipo = col_t.selectbox("Ocorrência", ["Falta", "Falta Justificada (Atestado)", "Atraso", "Saída Antecipada"], key=f"t_{nome}")
                             obs = col_o.text_input("Observação", key=f"o_{nome}")
                             dados_para_salvar.append({
                                 "aluno_nome": nome,
@@ -115,46 +113,42 @@ def tela_coleta_operacional():
                     
                     if st.button("🚀 SALVAR REGISTROS"):
                         supabase.table("movimentacao").insert(dados_para_salvar).execute()
-                        st.success("Dados sincronizados com sucesso!")
+                        st.success("Sincronizado com o SIS!")
                         st.balloons()
             else:
-                st.info("Nenhum aluno encontrado nesta turma.")
+                st.info("Nenhum aluno encontrado para esta turma.")
         except Exception as e:
-            st.error(f"Erro ao buscar alunos: {e}")
+            st.error(f"Erro ao filtrar alunos: {e}")
 
 def tela_analise_percentual():
     st.subheader("📊 ANÁLISE E PERCENTUAIS")
-    
     try:
         res = supabase.table("movimentacao").select("*").execute()
         if not res.data:
-            st.info("Ainda não há registros de movimentação para análise.")
+            st.info("Aguardando registros para gerar análise.")
             return
 
         df = pd.DataFrame(res.data)
-        aluno_busca = st.text_input("🔍 Localizar por nome do educando...")
+        aluno_busca = st.text_input("🔍 Localizar Educando", placeholder="Digite o nome...")
 
         if aluno_busca:
             df = df[df['aluno_nome'].str.contains(aluno_busca, case=False)]
 
-        base_dias = st.number_input("Base de Dias Letivos (Mês)", value=22, min_value=1)
+        base_dias = st.number_input("Dias Letivos de Base", value=22, min_value=1)
         
-        # Filtros de inteligência
         f_reais = len(df[df['tipo'] == 'Falta'])
         f_just = len(df[df['tipo'] == 'Falta Justificada (Atestado)'])
-        atrasos = len(df[df['tipo'] == 'Atraso'])
         perc = (f_reais / base_dias) * 100
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Faltas", f_reais)
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Faltas Reais", f_reais)
         c2.metric("Justificadas", f_just)
-        c3.metric("Atrasos", atrasos)
-        c4.metric("% Faltas Reais", f"{perc:.1f}%")
+        c3.metric("% Evasão/Falta", f"{perc:.1f}%")
 
         st.write("---")
         st.dataframe(df[['data_evento', 'aluno_nome', 'tipo', 'observacao']].sort_values(by='data_evento', ascending=False), use_container_width=True, hide_index=True)
     except Exception as e:
-        st.error(f"Erro ao processar dados: {e}")
+        st.error(f"Erro no processamento: {e}")
 
 if __name__ == "__main__":
     main()
